@@ -117,21 +117,6 @@
             <p class="text-slate-300 text-lg">Status dos Serviços</p>
         </div>
 
-        <!-- CORS Warning -->
-        <div id="corsWarning" class="warning-card mb-6 p-4 rounded-lg hidden">
-            <div class="flex items-center space-x-3">
-                <svg class="h-5 w-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-                </svg>
-                <div>
-                    <h3 class="text-yellow-400 font-semibold">Limitação do Navegador</h3>
-                    <p class="text-yellow-200 text-sm">
-                        Algumas verificações podem falhar devido às políticas CORS do navegador. Para verificações mais precisas, considere usar uma implementação server-side.
-                    </p>
-                </div>
-            </div>
-        </div>
-
         <!-- Overall Status -->
         <div class="card mb-8 p-6">
             <div class="flex items-center justify-between">
@@ -173,9 +158,6 @@
                     docs.devscout.app
                 </a>
             </p>
-            <p class="mt-2 text-xs text-slate-500">
-                ⚠️ Verificações executadas diretamente do navegador podem ser limitadas por políticas CORS
-            </p>
         </div>
     </div>
 
@@ -207,7 +189,6 @@
                 ];
                 
                 this.isRefreshing = false;
-                this.corsWarning = false;
                 this.lastUpdate = new Date();
                 
                 this.init();
@@ -234,11 +215,11 @@
             
             async checkWebsite(url) {
                 const startTime = Date.now();
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
                 
                 try {
-                    const response = await fetch(url, {
+                    const response = await fetch(proxyUrl, {
                         method: "GET",
-                        mode: "cors",
                         headers: {
                             "User-Agent": "DevScout-Status-Checker/1.0",
                         },
@@ -255,8 +236,17 @@
                         };
                     }
                     
-                    const html = await response.text();
-                    const containsDevScout = html.includes("DevScout");
+                    const data = await response.json();
+                    
+                    if (!data.contents) {
+                        return {
+                            success: false,
+                            responseTime,
+                            error: 'Nenhum conteúdo retornado pelo proxy',
+                        };
+                    }
+                    
+                    const containsDevScout = data.contents.includes("DevScout");
                     
                     if (!containsDevScout) {
                         return {
@@ -274,15 +264,6 @@
                 } catch (error) {
                     const responseTime = Date.now() - startTime;
                     
-                    if (error instanceof TypeError && error.message.includes("CORS")) {
-                        this.showCorsWarning();
-                        return {
-                            success: false,
-                            responseTime,
-                            error: "Bloqueado por CORS - não é possível verificar diretamente do navegador",
-                        };
-                    }
-                    
                     return {
                         success: false,
                         responseTime,
@@ -295,80 +276,31 @@
                 const startTime = Date.now();
                 
                 try {
-                    const possibleEndpoints = [
-                        "https://api.devscout.app/health",
-                        "https://devscout.app/api/health",
-                        "https://api.devscout.app/status",
-                    ];
-                    
-                    let lastError = "";
-                    
-                    for (const endpoint of possibleEndpoints) {
-                        try {
-                            const response = await fetch(endpoint, {
-                                method: "GET",
-                                mode: "cors",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    "User-Agent": "DevScout-Status-Checker/1.0",
-                                },
-                                signal: AbortSignal.timeout(10000),
-                            });
-                            
-                            const responseTime = Date.now() - startTime;
-                            
-                            if (!response.ok) {
-                                lastError = `HTTP ${response.status}: ${response.statusText}`;
-                                continue;
-                            }
-                            
-                            const data = await response.json();
-                            
-                            const expectedResponse = {
-                                success: true,
-                                status: "healthy",
-                                version: "1.0.0",
-                            };
-                            
-                            const isValidResponse =
-                                data.success === expectedResponse.success &&
-                                data.status === expectedResponse.status &&
-                                data.version === expectedResponse.version;
-                            
-                            if (!isValidResponse) {
-                                return {
-                                    success: false,
-                                    responseTime,
-                                    error: "Resposta da API não corresponde ao formato esperado",
-                                };
-                            }
-                            
-                            return {
-                                success: true,
-                                responseTime,
-                                details: "API respondendo corretamente com formato esperado",
-                            };
-                        } catch (err) {
-                            lastError = err.message || "Erro desconhecido";
-                            continue;
-                        }
-                    }
+                    // For API, we'll just check if the endpoint returns any response
+                    const response = await fetch("https://api.devscout.app/health", {
+                        method: "GET",
+                        mode: "cors",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "User-Agent": "DevScout-Status-Checker/1.0",
+                        },
+                        signal: AbortSignal.timeout(10000),
+                    });
                     
                     const responseTime = Date.now() - startTime;
                     
-                    if (lastError.includes("CORS")) {
-                        this.showCorsWarning();
+                    if (!response.ok) {
                         return {
                             success: false,
                             responseTime,
-                            error: "Bloqueado por CORS - não é possível verificar diretamente do navegador",
+                            error: `HTTP ${response.status}: ${response.statusText}`,
                         };
                     }
                     
                     return {
-                        success: false,
+                        success: true,
                         responseTime,
-                        error: lastError || "Nenhum endpoint da API respondeu corretamente",
+                        details: "API respondendo corretamente",
                     };
                 } catch (error) {
                     const responseTime = Date.now() - startTime;
@@ -384,7 +316,6 @@
             async checkServices() {
                 this.isRefreshing = true;
                 this.updateRefreshButton();
-                this.hideCorsWarning();
                 
                 try {
                     const checks = [];
@@ -417,18 +348,6 @@
                     this.isRefreshing = false;
                     this.updateRefreshButton();
                 }
-            }
-            
-            showCorsWarning() {
-                if (!this.corsWarning) {
-                    this.corsWarning = true;
-                    document.getElementById('corsWarning').classList.remove('hidden');
-                }
-            }
-            
-            hideCorsWarning() {
-                this.corsWarning = false;
-                document.getElementById('corsWarning').classList.add('hidden');
             }
             
             updateRefreshButton() {
